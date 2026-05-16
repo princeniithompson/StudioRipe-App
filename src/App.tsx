@@ -1722,8 +1722,9 @@ if (viewMode === 'dashboard') {
             
             <div 
               className="relative w-full h-[320px] md:h-[450px] flex items-center justify-center pointer-events-auto group/carousel touch-pan-y"
-              /* onMouseEnter={handleTemplateInteraction}
-              onTouchStart={handleTemplateInteraction} */
+              onMouseEnter={handleTemplateInteraction}
+              onTouchStart={handleTemplateInteraction}
+              onScroll={handleTemplateInteraction}
               style={{ transform: 'translateZ(0)', touchAction: 'pan-y' }}
             >
               {/* LIQUID MOTION VIRTUALIZATION: Use fixed indices to ensure zero-jump coordinate mapping */}
