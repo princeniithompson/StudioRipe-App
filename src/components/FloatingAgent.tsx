@@ -224,7 +224,18 @@ const PERSONALITIES = {
     voiceConfig: { pitch: 1.45, rate: 0.95, volume: 0.35 }
   },
   transparent: {
-    idlePhrases: ["How's the project going?", "Observing the flow...", "I'm here.", "Everything seems interesting.", "James is starting to feel colder in Act II.", "That scene still feels unfinished."],
+    idlePhrases: [
+        "James is starting to feel colder in Act II.",
+        "That scene still feels unfinished.",
+        "You never finished the courtroom lighting idea.",
+        "I’m still waiting to see Mr. Ali’s final scene.",
+        "You left Jacks hanging.",
+        "That transition shot could hit harder.",
+        "You were fixing the Dutch angles earlier.",
+        "We never resolved the ending.",
+        "James looked stronger in the first version.",
+        "Observing the flow..."
+    ],
     greetPhrase: "Welcome back.",
     awakePhrase: "I'm still here.",
     recoveryPhrase: "Calming down.",
