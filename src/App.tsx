@@ -581,7 +581,8 @@ function DeploymentSequenceOverlay({
   currentProject,
   assets,
   uploadedAssetIds,
-  onUploadSuccess
+  onUploadSuccess,
+  setAssetUploadStatuses
 }: { 
   isOpen: boolean; 
   onClose: () => void;
@@ -589,6 +590,7 @@ function DeploymentSequenceOverlay({
   assets: DBAsset[];
   uploadedAssetIds: string[];
   onUploadSuccess: () => void;
+  setAssetUploadStatuses: React.Dispatch<React.SetStateAction<Record<string, { status: 'idle' | 'uploading' | 'success' | 'error', message: string }>>>;
 }) {
   const [step, setStep] = useState<'loading'|'capacity'|'transit'|'uploading'|'complete'|'manage'>('loading');
   const [cloudProjects, setCloudProjects] = useState<DBProject[]>([]);
@@ -659,7 +661,11 @@ function DeploymentSequenceOverlay({
               continue;
             }
 
+            setAssetUploadStatuses(prev => ({ ...prev, [asset.id]: { status: 'uploading', message: 'Uploading...' } }));
             await deployAssetToCloud(currentProject.id, asset);
+            setAssetUploadStatuses(prev => ({ ...prev, [asset.id]: { status: 'success', message: 'Uploaded ✅' } }));
+            setTimeout(() => setAssetUploadStatuses(prev => ({ ...prev, [asset.id]: { status: 'idle', message: '' } })), 3000);
+            
             completedAssets++;
             setUploadStatus(prev => ({ ...prev, current: completedAssets + 1 }));
             
@@ -668,6 +674,7 @@ function DeploymentSequenceOverlay({
             setProgress(currentProgress);
             onUploadSuccess();
           } catch (err: any) {
+            setAssetUploadStatuses(prev => ({ ...prev, [asset.id]: { status: 'error', message: 'Upload Failed ❌' } }));
             console.error("Asset upload failed:", err);
             throw err;
           }
@@ -990,6 +997,8 @@ function MainApp() {
   }, []);
 
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetUploadStatuses, setAssetUploadStatuses] = 
+    useState<Record<string, { status: 'idle' | 'uploading' | 'success' | 'error', message: string }>>({});
   const [past, setPast] = useState<Asset[][]>([]);
   const [future, setFuture] = useState<Asset[][]>([]);
   const [viewMode, setViewMode] = useState<"dashboard" | "board" | "playback">(
@@ -4026,6 +4035,7 @@ function MainApp() {
                   triggerHaptic={triggerHaptic}
                   activeAccent={activeAccent}
                   isUploaded={uploadedAssetIds.includes(asset.id)}
+                  uploadStatus={assetUploadStatuses[asset.id]}
                 />
               ))}
             </motion.div>
@@ -4074,6 +4084,7 @@ function MainApp() {
             assets={assets}
             uploadedAssetIds={uploadedAssetIds}
             onUploadSuccess={refreshUploadedAssets}
+            setAssetUploadStatuses={setAssetUploadStatuses}
           />
         )}
       </AnimatePresence>
@@ -4289,6 +4300,7 @@ interface DraggableAssetProps {
   triggerHaptic: (type?: "light" | "medium" | "success") => void;
   activeAccent: string;
   isUploaded?: boolean;
+  uploadStatus?: { status: 'idle' | 'uploading' | 'success' | 'error', message: string };
 }
 
 const DraggableAsset = React.memo<DraggableAssetProps>(
@@ -4313,6 +4325,7 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
     triggerHaptic,
     activeAccent,
     isUploaded,
+    uploadStatus
   }) => {
     const [hadMultiTouch, setHadMultiTouch] = useState(false);
     const [loadError, setLoadError] = useState(false);
@@ -4565,6 +4578,15 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
         ${swapSourceId === asset.id || lastSwappedId === asset.id || (isHovered && swapSourceId && swapSourceId !== asset.id) ? "z-40" : ""}
       `}
         >
+          {/* Status Badge */}
+          {uploadStatus && uploadStatus.status !== 'idle' && (
+             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm rounded-xl">
+                <div className={`px-3 py-1 rounded-full text-[12px] font-black uppercase tracking-widest ${uploadStatus.status === 'success' ? 'bg-[#00ff66] text-black' : 'bg-red-500 text-white'}`}>
+                   {uploadStatus.message}
+                </div>
+             </div>
+          )}
+
           {/* Rotation & Delete Controls */}
           {!isLocked && (
             <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-4 z-[60]">
@@ -4871,6 +4893,12 @@ const StorageChoiceModal: React.FC<{
   const [step, setStep] = useState<"selection" | "risk">("selection");
   const [showToast, setShowToast] = useState(false);
 
+  const resetModalState = useCallback(() => {
+    setSelectedStorage(null);
+    setStep("selection");
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     if (showToast) {
       const timer = setTimeout(() => setShowToast(false), 3000);
@@ -4881,25 +4909,25 @@ const StorageChoiceModal: React.FC<{
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4" onClick={resetModalState}>
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 30 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl mx-auto my-auto max-h-[92vh] flex flex-col justify-between p-4 sm:p-8 overflow-y-auto bg-[#0c0c0e] border border-neutral-900 rounded-3xl shadow-[0_32px_64px_rgba(0,0,0,0.5)] relative"
       >
-        <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white hover:bg-white/10 rounded-full p-2 transition-all">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
+        <div className="flex justify-between items-start mb-6">
+            <div>
+               <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white uppercase text-left">Initialize Storage Protocol</h2>
+               <p className="text-xs sm:text-sm text-neutral-400 mt-1 sm:mt-2 leading-relaxed font-medium text-left">Select your primary production environment.</p>
+            </div>
+            <button onClick={resetModalState} className="text-neutral-500 hover:text-white hover:bg-white/10 rounded-full p-2 transition-all">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
         
         {step === 'selection' ? (
           <div>
-            <div className="flex items-center gap-4 mb-3">
-               <div className="w-1.5 h-6 bg-[#CCFF00] rounded-full" />
-               <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white uppercase text-left">Initialize Storage Protocol</h2>
-            </div>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1 sm:mt-2 mb-8 leading-relaxed font-medium text-left">Select your primary production environment. This protocol configuration is locked once the session initialization begins.</p>
-
             <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2 sm:gap-6">
             {/* Local Storage */}
             <button
@@ -4965,6 +4993,20 @@ const StorageChoiceModal: React.FC<{
                    )}
                 </div>
                 
+                 {/* Data Integrity Safeguard - Conditional */}
+                {selectedStorage === 'cloud' && (
+                    <div className="mt-4 p-4 bg-red-950/20 border border-red-500/30 rounded-xl">
+                      <h4 className="text-red-400 font-bold text-xs uppercase tracking-widest flex items-center gap-2 mb-2">
+                        <span className="text-lg">⚠️</span> Asset Integrity Notice
+                      </h4>
+                      <p className="text-neutral-300 text-[11px] leading-relaxed">
+                        To prevent assets from being discarded, <strong>always verify sync status</strong> before exiting. 
+                        Ensure your <strong>SHOT</strong> tags have achieved the "Sync Complete" glow. 
+                        Closing the app mid-transmission may lead to partial uploads.
+                      </p>
+                    </div>
+                )}
+                
                 <div className="flex gap-3">
                     <button onClick={() => setStep('selection')} className="flex-1 py-4 rounded-xl font-bold uppercase tracking-widest border border-neutral-700 text-neutral-400 hover:bg-neutral-800">
                         Back
@@ -4981,12 +5023,6 @@ const StorageChoiceModal: React.FC<{
                 Protocol Initialized!
             </div>
         )}
-
-        <div className="bg-black/40 p-4 border-t border-white/5 flex justify-center">
-          <span className="text-zinc-600 text-[10px] uppercase tracking-[0.2em] font-black">
-            StudioRipe Secure Channel
-          </span>
-        </div>
       </motion.div>
     </div>
   );
