@@ -1695,8 +1695,8 @@ function MainApp() {
         }
       }
 
-      const model = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const responseStream = await ai.models.generateContentStream({
+        model: "gemini-3.5-flash",
         contents: [
           ...agentMessages.map((m) => ({
             role: m.role,
@@ -1710,11 +1710,25 @@ function MainApp() {
         },
       });
 
-      const response = await model;
       setAgentMessages((prev) => [
         ...prev,
-        { role: "model", text: response.text },
+        { role: "model", text: "" },
       ]);
+
+      let fullText = "";
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          fullText += chunk.text;
+          setAgentMessages((prev) => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              ...newMessages[newMessages.length - 1],
+              text: fullText,
+            };
+            return newMessages;
+          });
+        }
+      }
     } catch (err: any) {
       console.error("Agent Error:", err);
       setAgentMessages((prev) => [
