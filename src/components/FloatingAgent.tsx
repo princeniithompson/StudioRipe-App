@@ -270,16 +270,12 @@ export function FloatingAgent({
   lastMessage?: string;
 }) {
   const triggerHapticInner = (type: 'light' | 'medium' | 'heavy' | 'warning' | 'mischief' | 'sustained-anger') => {
-    if (!hapticsEnabled || (window as any).isAgentHidden) return;
+    if (!hapticsEnabled) return;
     triggerHaptic(type);
   };
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - 90 : 0, y: typeof window !== 'undefined' ? 100 : 0 });
   const controls = useAnimation();
   const isMounted = useRef(false);
-
-  useEffect(() => {
-    (window as any).isAgentHidden = !isVisible;
-  }, [isVisible]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -330,9 +326,9 @@ export function FloatingAgent({
   useEffect(() => {
     (window as any).isAgentSleepMode = sleepMode;
     const handleVisibility = () => {
-      const isHidden = document.visibilityState === 'hidden' || !isVisible;
+      const isHidden = document.visibilityState === 'hidden';
       (window as any).isAgentHidden = isHidden;
-      if (document.visibilityState === 'hidden' || !isVisible) {
+      if (isHidden) {
         if ((window as any).sharedAudioContext) (window as any).sharedAudioContext.suspend();
         controls.stop();
       } else {
@@ -343,7 +339,7 @@ export function FloatingAgent({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [sleepMode, controls, isVisible]);
+  }, [sleepMode, controls]);
 
   // Tracking Inactivity
   const lastInteraction = useRef(Date.now());
@@ -355,14 +351,6 @@ export function FloatingAgent({
   const AGENT_H = 64;
 
   useEffect(() => {
-    if (!isVisible) {
-      setIdleState('active');
-      return;
-    }
-    
-    // Reset interaction time when becoming visible
-    lastInteraction.current = Date.now();
-
     const checkIdle = setInterval(() => {
       const elapsed = Date.now() - lastInteraction.current;
       let nextState: typeof idleState = 'active';
@@ -373,7 +361,7 @@ export function FloatingAgent({
       setIdleState(nextState);
     }, 2000);
     return () => clearInterval(checkIdle);
-  }, [isVisible]);
+  }, []);
 
   const [emotion, setEmotion] = useState<EmotionState>('calm');
   const [speech, setSpeech] = useState<string | null>(null);
@@ -422,15 +410,6 @@ export function FloatingAgent({
 
   // Manage idle state transitions (Evolution)
   useEffect(() => {
-    if (!isVisible) {
-      if (zzzTimer.current) {
-        clearInterval(zzzTimer.current);
-        zzzTimer.current = null;
-      }
-      setSpeech(null);
-      return;
-    }
-
     if (Date.now() < emotionLock.current) return;
     
     if (idleState === 'active') {
@@ -476,7 +455,7 @@ export function FloatingAgent({
         }, 75000);
       }
     }
-  }, [idleState, emotion, currentProjectTitle, type, isVisible]);
+  }, [idleState, emotion, currentProjectTitle, type]);
 
   // Cleanup timers on unmount
   useEffect(() => {
