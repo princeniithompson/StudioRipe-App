@@ -115,6 +115,65 @@ interface AgentMessage {
 // --- Global Cache for Blob URLs to ensure zero-latency navigation ---
 const BLOB_URL_CACHE = new Map<string, string>();
 
+/**
+ * SmartVideo pauses playback when not in viewport or when the tab is hidden to save battery.
+ */
+const SmartVideo = React.forwardRef<HTMLVideoElement, React.VideoHTMLAttributes<HTMLVideoElement>>((props, externalRef) => {
+  const localRef = useRef<HTMLVideoElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [isTabVisible, setIsTabVisible] = useState(true);
+
+  // Sync ref
+  useEffect(() => {
+    if (typeof externalRef === 'function') {
+      externalRef(localRef.current);
+    } else if (externalRef) {
+      externalRef.current = localRef.current;
+    }
+  }, [externalRef]);
+  
+  // Tab visibility
+  useEffect(() => {
+    const handleVisibilityChange = () => setIsTabVisible(document.visibilityState === 'visible');
+    setIsTabVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // Intersection observer
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => setIsVisible(entry.isIntersecting));
+    }, { threshold: 0.1 });
+    
+    if (localRef.current) {
+      observer.observe(localRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  // Play/Pause logic
+  useEffect(() => {
+    const video = localRef.current;
+    if (!video) return;
+    
+    if (props.autoPlay) {
+      if (isVisible && isTabVisible) {
+        if (video.paused) video.play().catch(() => {});
+      } else {
+        if (!video.paused) video.pause();
+      }
+    } else {
+       if (!isTabVisible && !video.paused) {
+         video.pause();
+       }
+    }
+  }, [isVisible, isTabVisible, props.autoPlay]);
+
+  return <video {...props} ref={localRef} />;
+});
+SmartVideo.displayName = 'SmartVideo';
+
 function getCachedUrl(
   id: string,
   file?: File | Blob | null,
@@ -135,7 +194,17 @@ function getCachedUrl(
   return null;
 }
 
-function ProjectCard({
+function cleanupBlobUrls(activeIds: string[]) {
+  for (const [id, url] of BLOB_URL_CACHE.entries()) {
+    if (!activeIds.includes(id)) {
+      URL.revokeObjectURL(url);
+      BLOB_URL_CACHE.delete(id);
+    }
+  }
+}
+
+
+const ProjectCard = React.memo(({
   project,
   onOpen,
   onDelete,
@@ -147,7 +216,7 @@ function ProjectCard({
   onDelete: () => void;
   onRename: () => void;
   activeAccent?: string;
-}) {
+}) => {
   const firstAsset = project.assets.length > 0 ? project.assets[0] : null;
   // Use persistent blob URL from cache if available to prevent flickering
   const [coverUrl, setCoverUrl] = useState<string | null>(() => {
@@ -187,12 +256,11 @@ function ProjectCard({
       <div className="w-full aspect-[4/3] sm:aspect-[16/10] object-cover bg-black/40 relative overflow-hidden">
         {coverUrl ? (
           firstAsset?.type === "video" ? (
-            <video
+            <SmartVideo
               ref={(el) => {
                 if (el) {
                   el.defaultMuted = true;
                   el.muted = true;
-                  el.play().catch(() => {});
                 }
               }}
               src={coverUrl || undefined}
@@ -201,6 +269,8 @@ function ProjectCard({
               autoPlay
               loop
               playsInline
+              preload="none"
+              controls={false}
             />
           ) : (
             <img
@@ -319,11 +389,12 @@ function ProjectCard({
       </AnimatePresence>
     </div>
   );
-}
+});
+ProjectCard.displayName = "ProjectCard";
 
 // --- Components ---
 
-const TemplateVideo = ({
+const TemplateVideo = React.memo(({
   src,
   className,
   isActive,
@@ -357,23 +428,31 @@ const TemplateVideo = ({
     : null;
 
   // Sync playback state for native video
+  const [tabVisible, setTabVisible] = useState(true);
+  useEffect(() => {
+    const handleVisibility = () => setTabVisible(document.visibilityState === "visible");
+    handleVisibility();
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
   useLayoutEffect(() => {
     if (isStreamable) return;
     const v = videoRef.current;
     if (!v || !isVisible) return;
 
-    if (isActive) {
+    if (isActive && tabVisible) {
       v.muted = true;
       v.playsInline = true;
       // Use play() directly with no checks to maximize speed
       v.play().catch(() => {});
     } else {
-      // Don't pause neighbors as aggressively to avoid black flickers
-      if (Math.abs(absOffset || 0) > 1.8) {
+      // Don't pause neighbors as aggressively to avoid black flickers unless tab is hidden
+      if (!tabVisible || Math.abs(absOffset || 0) > 1.8) {
         v.pause();
       }
     }
-  }, [isActive, isVisible, key, isStreamable, absOffset]);
+  }, [isActive, isVisible, key, isStreamable, absOffset, tabVisible]);
 
   // Loading indicator with timeout safety
   useEffect(() => {
@@ -435,7 +514,7 @@ const TemplateVideo = ({
             playsInline
             autoPlay={isActive}
             controls={false}
-            preload="auto"
+            preload="none"
             onLoadedData={() => {
               setIsLoaded(true);
               setShowSpinner(false);
@@ -487,7 +566,8 @@ const TemplateVideo = ({
       )}
     </div>
   );
-};
+});
+TemplateVideo.displayName = "TemplateVideo";
 
 // --- TEMPLATE CONFIGURATION ---
 // To use your own videos:
@@ -545,7 +625,7 @@ export const AuthContext = React.createContext<AuthContextType>({
   setActiveAccent: () => {},
   fontScale: 1.0,
   setFontScale: () => {},
-  agentSettings: { type: "emoji", soundEnabled: true, hapticsEnabled: true },
+  agentSettings: { type: "emoji", soundEnabled: true, hapticsEnabled: true, sleepMode: false },
   setAgentSettings: () => {},
 });
 
@@ -1007,6 +1087,20 @@ function MainApp() {
   const [viewMode, setViewMode] = useState<"dashboard" | "board" | "playback">(
     "dashboard",
   );
+
+  useEffect(() => {
+    // Perform cleanup every few seconds to avoid overhead, or when assets/viewMode changes.
+    // Gather all active asset IDs from current assets, past, and future histories.
+    const activeIds = new Set<string>();
+    assets.forEach((a) => activeIds.add(a.id));
+    past.forEach((history) => history.forEach((a) => activeIds.add(a.id)));
+    future.forEach((history) => history.forEach((a) => activeIds.add(a.id)));
+    
+    // Also include project cover urls if they are blobs? They might not have ids matching CACHE exactly.
+    // To be safe, just cleanup based on known asset IDs.
+    cleanupBlobUrls(Array.from(activeIds));
+    
+  }, [assets, past, future, viewMode]);
   const [templateInteractionTime, setTemplateInteractionTime] =
     useState<number>(0);
   const [showTemplateArrows, setShowTemplateArrows] = useState(true);
@@ -1305,11 +1399,19 @@ function MainApp() {
     }
   }, [assets, agentMessages, currentProject?.id, viewMode]);
 
-  const pushHistory = (newAssets: Asset[]) => {
-    setPast((prev) => [...prev, assets]);
-    setFuture([]);
-    setAssets(newAssets);
-  };
+  const pushHistoryUpdater = useCallback((updater: (prevAssets: Asset[]) => Asset[]) => {
+    setAssets((prev) => {
+      const newAssets = updater(prev);
+      if (newAssets === prev) return prev;
+      setPast((p) => [...p, prev]);
+      setFuture([]);
+      return newAssets;
+    });
+  }, []);
+
+  const pushHistory = useCallback((newAssets: Asset[]) => {
+    pushHistoryUpdater(() => newAssets);
+  }, [pushHistoryUpdater]);
 
   const undo = useCallback(() => {
     if (past.length === 0) return;
@@ -1855,14 +1957,14 @@ function MainApp() {
     }
   };
 
-  const removeAsset = (id: string) => {
-    const filtered = assets.filter((a) => a.id !== id);
-    // Re-sequence
-    const resequenced = filtered.map((a, idx) => ({ ...a, sequence: idx + 1 }));
-    pushHistory(resequenced);
-  };
+  const removeAsset = useCallback((id: string) => {
+    pushHistoryUpdater((prev) => {
+      const filtered = prev.filter((a) => a.id !== id);
+      return filtered.map((a, idx) => ({ ...a, sequence: idx + 1 }));
+    });
+  }, [pushHistoryUpdater]);
 
-  const updateAssetPos = (
+  const updateAssetPos = useCallback((
     id: string,
     x: number,
     y: number,
@@ -1870,25 +1972,23 @@ function MainApp() {
   ) => {
     if (isLayoutLocked) return;
 
-    let finalX = x;
-    let finalY = y;
-
-    const newAssets = assets.map((a) =>
-      a.id === id
-        ? {
-            ...a,
-            x: finalX,
-            y: finalY,
-            rotation: rotation !== undefined ? rotation : a.rotation,
-          }
-        : a,
+    pushHistoryUpdater((prev) => 
+      prev.map((a) =>
+        a.id === id
+          ? {
+              ...a,
+              x,
+              y,
+              rotation: rotation !== undefined ? rotation : a.rotation,
+            }
+          : a
+      )
     );
-    pushHistory(newAssets);
-  };
+  }, [isLayoutLocked, pushHistoryUpdater]);
 
-  const updateAssetData = (newAsset: Asset) => {
+  const updateAssetData = useCallback((newAsset: Asset) => {
     setAssets((prev) => prev.map((a) => (a.id === newAsset.id ? newAsset : a)));
-  };
+  }, []);
 
   const zoomIn = () =>
     setTransform((prev) => ({ ...prev, zoom: Math.min(prev.zoom + 0.1, 3) }));
@@ -1934,7 +2034,7 @@ function MainApp() {
     [deleteSelection.length, removeAsset],
   );
 
-  const handleConfirmDelete = (mode: "single" | "all") => {
+  const handleConfirmDelete = useCallback((mode: "single" | "all") => {
     if (!deleteConfirmTarget) return;
 
     if (mode === "single") {
@@ -1943,14 +2043,15 @@ function MainApp() {
         prev.filter((p) => p !== deleteConfirmTarget),
       );
     } else {
-      const newAssets = assets
-        .filter((a) => !deleteSelection.includes(a.id))
-        .map((a, idx) => ({ ...a, sequence: idx + 1 })); // Re-sequence
-      pushHistory(newAssets);
+      pushHistoryUpdater((prevAssets) => {
+        return prevAssets
+          .filter((a) => !deleteSelection.includes(a.id))
+          .map((a, idx) => ({ ...a, sequence: idx + 1 })); // Re-sequence
+      });
       setDeleteSelection([]);
     }
     setDeleteConfirmTarget(null);
-  };
+  }, [deleteConfirmTarget, deleteSelection, pushHistoryUpdater, removeAsset]);
 
   // Layout Config for perfectly fitted storyboard grids
   const getLayoutConfig = () => {
@@ -2027,7 +2128,7 @@ function MainApp() {
     return () => window.removeEventListener("resize", handleResize);
   }, [calculateAutoLayout]);
 
-  const swapSequence = (id1: string, id2: string) => {
+  const swapSequence = useCallback((id1: string, id2: string) => {
     setHoveredAssetId(null);
     setSwapSourceId(null);
     setLastSwappedId(id2);
@@ -2035,25 +2136,24 @@ function MainApp() {
     // Success flash duration
     setTimeout(() => setLastSwappedId(null), 1000);
 
-    const asset1 = assets.find((a) => a.id === id1);
-    const asset2 = assets.find((a) => a.id === id2);
-    if (!asset1 || !asset2 || id1 === id2) return;
+    pushHistoryUpdater((prevAssets) => {
+      const asset1 = prevAssets.find((a) => a.id === id1);
+      const asset2 = prevAssets.find((a) => a.id === id2);
+      if (!asset1 || !asset2 || id1 === id2) return prevAssets;
 
-    // Swap sequence only, then re-calculate layout to properly handle different aspect ratios
-    // without gaps or overlaps. Strict column layout in calculateAutoLayout prevents cascading shifts.
-    const updated = assets.map((a) => {
-      if (a.id === id1) {
-        return { ...a, sequence: asset2.sequence };
-      }
-      if (a.id === id2) {
-        return { ...a, sequence: asset1.sequence };
-      }
-      return a;
+      const updated = prevAssets.map((a) => {
+        if (a.id === id1) {
+          return { ...a, sequence: asset2.sequence };
+        }
+        if (a.id === id2) {
+          return { ...a, sequence: asset1.sequence };
+        }
+        return a;
+      });
+
+      return calculateAutoLayout(updated);
     });
-
-    const reArranged = calculateAutoLayout(updated);
-    pushHistory(reArranged);
-  };
+  }, [calculateAutoLayout, pushHistoryUpdater]);
 
   // Memoize sorted assets for performance
   const sortedAssets = React.useMemo(
@@ -4057,13 +4157,11 @@ function MainApp() {
                 <DraggableAsset
                   key={asset.id}
                   asset={asset}
-                  onRemove={() => handleRequestDelete(asset.id)}
+                  onRemove={handleRequestDelete}
                   onSelectForDelete={handleSelectForDelete}
                   isDeleteSelected={deleteSelection.includes(asset.id)}
                   isDeleteModeActive={deleteSelection.length > 0}
-                  onUpdate={(x, y, rotation) =>
-                    updateAssetPos(asset.id, x, y, rotation)
-                  }
+                  onUpdate={updateAssetPos}
                   onAssetChange={updateAssetData}
                   onSwap={swapSequence}
                   isHovered={hoveredAssetId === asset.id}
@@ -4244,7 +4342,7 @@ function MainApp() {
                       className="max-w-full max-h-[85vh] object-contain"
                     />
                   ) : sortedAssets[currentIndex]?.type === "video" ? (
-                    <video
+                    <SmartVideo
                       src={sortedAssets[currentIndex].url || undefined}
                       autoPlay
                       loop
@@ -4324,11 +4422,11 @@ function MainApp() {
 
 interface DraggableAssetProps {
   asset: Asset;
-  onRemove: () => void;
+  onRemove: (id: string) => void;
   onSelectForDelete: (id: string, toggle: boolean) => void;
   isDeleteSelected: boolean;
   isDeleteModeActive: boolean;
-  onUpdate: (x: number, y: number, rotation?: number) => void;
+  onUpdate: (id: string, x: number, y: number, rotation?: number) => void;
   onAssetChange: (asset: Asset) => void;
   onSwap: (id1: string, id2: string) => void;
   isHovered: boolean;
@@ -4595,6 +4693,7 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
             // Use a functional update or ensure we have the latest rotation if it can change during drag
             // In this case, rotation only changes via the rotation handle which disables dragging
             onUpdate(
+              asset.id,
               asset.x + info.offset.x / zoom,
               asset.y + info.offset.y / zoom,
               rotation,
@@ -4668,7 +4767,7 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
                       "pointerup",
                       handlePointerUpLocal,
                     );
-                    onUpdate(asset.x, asset.y, currentDeg);
+                    onUpdate(asset.id, asset.x, asset.y, currentDeg);
                   };
 
                   window.addEventListener("pointermove", handlePointerMove);
@@ -4688,7 +4787,7 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemove();
+                    onRemove(asset.id);
                     triggerHaptic("medium");
                   }}
                   className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-2xl border border-white/20 flex items-center justify-center text-white shadow-[0_8px_32_rgba(0,0,0,0.5),inset_0_0_12px_rgba(255,255,255,0.1)] hover:bg-white/20 hover:border-indigo-400 group-hover/delete:text-indigo-400 transition-all active:scale-95 group/btn relative overflow-hidden"
@@ -4753,12 +4852,11 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
               style={{ transformOrigin: "center" }}
             >
               {asset.type === "video" ? (
-                <video
+                <SmartVideo
                   ref={(el) => {
                     if (el) {
                       el.defaultMuted = true;
                       el.muted = true;
-                      el.play().catch(() => {});
                     }
                   }}
                   key={`${asset.url}-${retryCount}`}
@@ -4892,7 +4990,7 @@ const DraggableAsset = React.memo<DraggableAssetProps>(
                       whileTap={{ scale: 0.9 }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onRemove();
+                        onRemove(asset.id);
                         triggerHaptic("medium");
                       }}
                       className="w-16 h-16 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-2xl ring-4 ring-white/20 pointer-events-auto"
