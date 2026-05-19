@@ -179,7 +179,8 @@ const playSound = (type: 'squeak' | 'ouch' | 'pop' | 'yawn' | 'low-hum' | 'glitc
   } catch(e) {}
 };
 
-const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'warning' | 'mischief' | 'sustained-anger') => {
+const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'warning' | 'mischief' | 'sustained-anger', enabled: boolean = true) => {
+  if (!enabled) return;
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
     switch (type) {
       case 'light': navigator.vibrate(15); break;
@@ -251,6 +252,7 @@ export function FloatingAgent({
   isVisible = true,
   type = 'emoji',
   soundEnabled = true,
+  hapticsEnabled = true,
   currentProjectTitle,
   lastMessage
 }: { 
@@ -258,9 +260,14 @@ export function FloatingAgent({
   isVisible?: boolean;
   type?: 'blue' | 'emoji' | 'transparent';
   soundEnabled?: boolean;
+  hapticsEnabled?: boolean;
   currentProjectTitle?: string;
   lastMessage?: string;
 }) {
+  const triggerHapticInner = (type: 'light' | 'medium' | 'heavy' | 'warning' | 'mischief' | 'sustained-anger') => {
+    if (!hapticsEnabled) return;
+    triggerHaptic(type);
+  };
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - 90 : 0, y: typeof window !== 'undefined' ? 100 : 0 });
   const controls = useAnimation();
   const isMounted = useRef(false);
@@ -662,7 +669,7 @@ export function FloatingAgent({
       if (!isMounted.current) return;
       setEmotion('vomit');
       playSound('puke', soundEnabled);
-      triggerHaptic('heavy');
+      triggerHapticInner('heavy');
       
       await controls.start({ 
         y: [0, 25, -10, 5, 0], 
@@ -846,15 +853,15 @@ export function FloatingAgent({
            setTimeout(() => setSpeech(null), 2000);
         } else if (nextStage === 2) { // Distracted
            setSpeech(["Can I focus?", "I was thinking.", "You're distracting me.", "Hey, watch out."][Math.floor(Math.random()*4)]);
-           triggerHaptic('light');
+           triggerHapticInner('light');
            setTimeout(() => setSpeech(null), 3000);
         } else if (nextStage === 3) { // Annoyed
            setSpeech(["Hey, that hurts.", "Please stop.", "You're messing everything up.", "Stop, please."][Math.floor(Math.random()*4)]);
-           triggerHaptic('medium');
+           triggerHapticInner('medium');
            setTimeout(() => setSpeech(null), 3000);
         } else if (nextStage === 4) { // Heated / Red
            setSpeech(["Enough.", "You're pushing it too far.", "I really don't enjoy this.", "Stop now."][Math.floor(Math.random()*4)]);
-           triggerHaptic('sustained-anger');
+           triggerHapticInner('sustained-anger');
            setTimeout(() => setSpeech(null), 3000);
            
            // Cool down after a while to allow decay
@@ -885,7 +892,7 @@ export function FloatingAgent({
         
         // IMMEDIATE FEEDBACK: Red viewport and Haptics
         setIsRetaliating('infestation'); 
-        triggerHaptic('sustained-anger');
+        triggerHapticInner('sustained-anger');
         playSound('chuckle', soundEnabled);
         playSound('low-hum', soundEnabled);
 
@@ -968,7 +975,7 @@ export function FloatingAgent({
       else if (harassmentLevel.current >= 7) {
         setEmotion('angry');
         // ENABLED sustanied-anger only for RED emojis 😡🤬
-        triggerHaptic('sustained-anger');
+        triggerHapticInner('sustained-anger');
         playSound('growl', soundEnabled);
         if (Math.random() > 0.3) {
           const msg = getContextAwarePhrase('hurt');
@@ -1202,11 +1209,11 @@ export function FloatingAgent({
 
              if (dirX !== 0 && dirX !== lastDirection.current.x) {
                 dizzinessMeter.current += velocity * 0.25; // Direction reversal adds meter significantly
-                if (velocity > 15) triggerHaptic('light');
+                if (velocity > 15) triggerHapticInner('light');
              }
              if (dirY !== 0 && dirY !== lastDirection.current.y) {
                 dizzinessMeter.current += velocity * 0.25;
-                if (velocity > 15) triggerHaptic('light');
+                if (velocity > 15) triggerHapticInner('light');
              }
              lastDirection.current = { x: dirX, y: dirY };
 
@@ -1249,7 +1256,7 @@ export function FloatingAgent({
                 lastCollisionTime.current = now;
                 setEmotion('hurt');
                 playSound('ouch', soundEnabled);
-                triggerHaptic('heavy');
+                triggerHapticInner('heavy');
                 
                 // Visual impact bounce
                 if (isMounted.current) {

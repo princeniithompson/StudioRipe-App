@@ -1,0 +1,62 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.email == 'princeniithompson@gmail.com'; }
+    
+    function isValidUserConfig(data) {
+      let isAccentValid = !('activeAccent' in data) || (data.activeAccent is string && data.activeAccent.size() <= 50);
+      let isFontScaleValid = !('fontScale' in data) || data.fontScale is number;
+      let isAgentSettingsValid = !('agentSettings' in data) || data.agentSettings is map;
+      let isCreatedAtValid = !('createdAt' in data) || data.createdAt is number;
+      return isAccentValid && isFontScaleValid && isAgentSettingsValid && isCreatedAtValid;
+    }
+    
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidUserConfig(incoming());
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidUserConfig(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['activeAccent', 'fontScale', 'agentSettings', 'createdAt'])
+      );
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+    }
+
+    function isValidProject(data) {
+      let isIdValid = data.id is string && data.id.size() <= 128;
+      let isTitleValid = data.title is string && data.title.size() <= 200;
+      let isUpdatedAtValid = data.updatedAt is number;
+      let isUserIdValid = data.userId == request.auth.uid;
+      // Allow empty lists, but bound them to prevent resource exhaustion attacks
+      let isAssetsValid = data.assets is list && data.assets.size() <= 1000;
+      let isMessagesValid = !('agentMessages' in data) || (data.agentMessages is list && data.agentMessages.size() <= 200);
+      return isIdValid && isTitleValid && isUpdatedAtValid && isUserIdValid && isAssetsValid && isMessagesValid;
+    }
+
+    match /projects/{projectId} {
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid && isValidId(projectId));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      
+      allow create: if isAdmin() || (isSignedIn() && isValidId(projectId) && isValidProject(incoming()) && incoming().keys().hasAll(['id', 'title', 'updatedAt', 'userId', 'assets']));
+      
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid && isValidId(projectId) && isValidProject(incoming()) && incoming().userId == resource.data.userId && (
+        incoming().diff(resource.data).affectedKeys().hasOnly(['id', 'title', 'updatedAt', 'userId', 'assets', 'agentMessages'])
+      ));
+      
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      match /assets/{assetId} {
+        allow read, write: if isAdmin() || (isSignedIn() && get(/databases/$(database)/documents/projects/$(projectId)).data.userId == request.auth.uid);
+      }
+    }
+  }
+}
