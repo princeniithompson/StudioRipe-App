@@ -4,11 +4,14 @@ import { motion, useAnimation, AnimatePresence } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 
 const playSound = (type: 'squeak' | 'ouch' | 'pop' | 'yawn' | 'low-hum' | 'glitch' | 'sigh' | 'giggle' | 'breath' | 'chuckle' | 'growl' | 'snore' | 'woah' | 'whistle' | 'stomach' | 'puke' | 'wobble' | 'cough', enabled: boolean = true) => {
-  if (!enabled) return;
+  if (!enabled || (window as any).isAgentSleepMode || (window as any).isAgentHidden) return;
   try {
-    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
+    (window as any).sharedAudioContext = (window as any).sharedAudioContext || new ((window as any).AudioContext || (window as any).webkitAudioContext)();
+    const ctx = (window as any).sharedAudioContext;
+    
+    // Ensure context is running, especially if resumed from suspension
+    if (ctx.state === 'suspended') ctx.resume();
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -253,6 +256,7 @@ export function FloatingAgent({
   type = 'emoji',
   soundEnabled = true,
   hapticsEnabled = true,
+  sleepMode = false,
   currentProjectTitle,
   lastMessage
 }: { 
@@ -261,6 +265,7 @@ export function FloatingAgent({
   type?: 'blue' | 'emoji' | 'transparent';
   soundEnabled?: boolean;
   hapticsEnabled?: boolean;
+  sleepMode?: boolean;
   currentProjectTitle?: string;
   lastMessage?: string;
 }) {
@@ -316,6 +321,25 @@ export function FloatingAgent({
       window.removeEventListener('touchstart', resetIdle);
     };
   }, []);
+
+  // Visibility and sleep mode handling
+  useEffect(() => {
+    (window as any).isAgentSleepMode = sleepMode;
+    const handleVisibility = () => {
+      const isHidden = document.visibilityState === 'hidden';
+      (window as any).isAgentHidden = isHidden;
+      if (isHidden) {
+        if ((window as any).sharedAudioContext) (window as any).sharedAudioContext.suspend();
+        controls.stop();
+      } else {
+        if ((window as any).sharedAudioContext) (window as any).sharedAudioContext.resume();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [sleepMode, controls]);
 
   // Tracking Inactivity
   const lastInteraction = useRef(Date.now());
@@ -428,7 +452,7 @@ export function FloatingAgent({
           setSpeech(msg);
           if (Math.random() > 0.4) playSound('snore', soundEnabled);
           setTimeout(() => setSpeech(null), 3000);
-        }, 8000);
+        }, 75000);
       }
     }
   }, [idleState, emotion, currentProjectTitle, type]);
@@ -445,8 +469,8 @@ export function FloatingAgent({
     let active = true;
     const startIdleAnimation = async () => {
       while (active) {
-        // Stop idle animation if retaliating or locked
-        if (isRetaliating || Date.now() < emotionLock.current || isDragging || !isMounted.current) {
+        // Stop idle animation if retaliating or locked or sleeping/hidden
+        if (isRetaliating || Date.now() < emotionLock.current || isDragging || !isMounted.current || (window as any).isAgentSleepMode || (window as any).isAgentHidden) {
           await new Promise(resolve => setTimeout(resolve, 800));
           continue;
         }

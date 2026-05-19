@@ -57,6 +57,8 @@ import {
   Unlock,
   Volume2,
   VolumeX,
+  Sun,
+  Moon,
   Smile,
   Ghost,
   HardDrive,
@@ -75,6 +77,7 @@ interface AgentSettings {
   type: AgentType;
   soundEnabled: boolean;
   hapticsEnabled: boolean;
+  sleepMode: boolean;
 }
 
 type AssetType = "image" | "video";
@@ -2941,6 +2944,45 @@ function MainApp() {
                           {agentSettings.soundEnabled ? "Engaged" : "Disconnected"}
                         </span>
                       </motion.button>
+
+                      {/* Agent Sleep Mode Toggle */}
+                      <motion.button
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          if (isSettingsScrolling.current) return;
+                          setActivatingRow("sleep-mode");
+                          setTimeout(() => {
+                            if (isSettingsScrolling.current) {
+                              setActivatingRow(null);
+                              return;
+                            }
+                            setAgentSettings((prev) => ({
+                              ...prev,
+                              sleepMode: !prev.sleepMode,
+                            }));
+                            setActivatingRow(null);
+                          }, 300);
+                        }}
+                        className={`w-full p-4 transition-colors flex items-center justify-between group ${activatingRow === "sleep-mode" ? "bg-[#111111]" : "bg-transparent hover:bg-[#111111]"}`}
+                        style={{ boxShadow: activatingRow === "sleep-mode" ? `inset 2px 0 0 ${activeAccent}` : undefined }}
+                      >
+                        <div className="flex items-center gap-4 text-left">
+                          <div className="w-10 h-10 rounded-lg bg-[#111111] flex items-center justify-center shrink-0 shadow-sm border border-[#222222]">
+                            {agentSettings.sleepMode ? <Moon size={18} className="text-[var(--theme-accent)]" strokeWidth={2} /> : <Sun size={18} className="text-white" strokeWidth={2} />}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[15px] font-bold text-white tracking-wide leading-tight">
+                              Agent Low-Power/Sleep
+                            </span>
+                            <span className="text-[11px] text-[#666666] font-medium mt-0.5">
+                              Disable all idle sounds and activity to save battery
+                            </span>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-bold tracking-widest uppercase transition-colors ${agentSettings.sleepMode ? "text-[var(--theme-accent)]" : "text-[#444444]"}`}>
+                          {agentSettings.sleepMode ? "Active" : "Disabled"}
+                        </span>
+                      </motion.button>
                     </div>
                   </div>
                 </motion.div>
@@ -3503,6 +3545,7 @@ function MainApp() {
         type={agentSettings.type}
         soundEnabled={agentSettings.soundEnabled}
         hapticsEnabled={agentSettings.hapticsEnabled}
+        sleepMode={agentSettings.sleepMode}
         currentProjectTitle={currentProject?.title}
         lastMessage={agentMessages[agentMessages.length - 1]?.text}
       />
@@ -5033,7 +5076,7 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [activeAccent, setActiveAccent] = useState("#00FF87");
   const [fontScale, setFontScale] = useState(1.0);
-  const [agentSettings, setAgentSettings] = useState<AgentSettings>({ type: "emoji", soundEnabled: true, hapticsEnabled: true });
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>({ type: "emoji", soundEnabled: true, hapticsEnabled: true, sleepMode: false });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
